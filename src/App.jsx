@@ -1,113 +1,137 @@
-// src/App.jsx
 import { useState, useEffect } from 'react';
 import MapComponent from './MapComponent';
 import './App.css';
 
 function App() {
-  const [hospitales, setHospitales] = useState([]);
-  const [ruta, setRuta] = useState([]);
-  const [incidente, setIncidente] = useState(null);
-  const [rutaInfo, setRutaInfo] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState("Cargando datos...");
+    const [hospitales, setHospitales] = useState([]);
+    const [ruta, setRuta] = useState([]);
+    const [incidente, setIncidente] = useState(null);
+    const [rutaInfo, setRutaInfo] = useState(null);
+    const [loading, setLoading] = useState(false);
+    const [status, setStatus] = useState("Cargando red vial...");
 
-  const API_BASE = 'http://127.0.0.1:5001';
+    const API_BASE = 'http://127.0.0.1:5001';
 
-  // 1. Cargar Hospitales al iniciar
-  useEffect(() => {
-    fetch(`${API_BASE}/api/graph`)
-      .then(res => res.json())
-      .then(data => {
-        // Filtramos solo los nodos que son hospitales para no saturar el mapa de React con 5000 marcadores
-        const soloHospitales = data.nodes.filter(n => n.type === 'hospital');
-        setHospitales(soloHospitales);
-        setStatus("Listo. Haz clic en el mapa para reportar un accidente.");
-      })
-      .catch(err => {
-        console.error(err);
-        setStatus("Error al conectar con el servidor backend.");
-      });
-  }, []);
+    // Carga inicial de hospitales
+    useEffect(() => {
+        fetch(`${API_BASE}/api/graph`)
+            .then(res => res.json())
+            .then(data => {
+                setHospitales(data.nodes);
+                setStatus("Sistema listo. Reporte una emergencia haciendo clic en el mapa.");
+            })
+            .catch(err => setStatus("Error de conexión con el servidor."));
+    }, []);
 
-  // 2. Función cuando el usuario hace clic
-  const handleMapClick = async (lat, lon) => {
-    setIncidente([lat, lon]);
-    setLoading(true);
-    setStatus("Calculando ruta óptima...");
-    setRuta([]); // Limpiar ruta anterior
-    setRutaInfo(null);
+    // Manejo del clic
+    const handleMapClick = async (lat, lon) => {
+        setIncidente([lat, lon]);
+        setLoading(true);
+        setStatus("Analizando tráfico y capacidad hospitalaria...");
+        setRuta([]);
+        setRutaInfo(null);
 
-    try {
-      const response = await fetch(`${API_BASE}/calculate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ lat, lon })
-      });
+        try {
+            const response = await fetch(`${API_BASE}/calculate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ lat, lon })
+            });
 
-      if (!response.ok) throw new Error("Error en el cálculo");
+            if (!response.ok) throw new Error("Error");
+            const data = await response.json();
 
-      const data = await response.json();
-      
-      setRuta(data.path_coords);
-      setRutaInfo(data);
-      setStatus("Ruta calculada exitosamente.");
-    } catch (error) {
-      console.error(error);
-      setStatus("Error al calcular la ruta.");
-    } finally {
-      setLoading(false);
-    }
-  };
+            setRuta(data.path_coords);
+            setRutaInfo(data);
 
-  return (
-    <div className="app-container">
-      <header>
-        <h1>🚑 MedRoute React</h1>
-      </header>
+            // ACTUALIZAR ESTADO DE HOSPITALES (Para que el semáforo cambie de color)
+            // Fusionamos la data vieja con las nuevas ocupaciones que generó el backend
+            if (data.updated_hospitals) {
+                setHospitales(prev => prev.map(h => {
+                    const update = data.updated_hospitals.find(u => u.id === h.id);
+                    return update ? { ...h, ...update } : h;
+                }));
+            }
 
-      <div className="main-content">
-        <div className="map-container">
-          <MapComponent 
-            hospitales={hospitales} 
-            ruta={ruta} 
-            incidente={incidente}
-            onMapClick={handleMapClick} 
-          />
-        </div>
+            setStatus("Ruta óptima encontrada.");
+        } catch (error) {
+            console.error(error);
+            setStatus("Error al calcular ruta.");
+        } finally {
+            setLoading(false);
+        }
+    };
 
-        <div className="sidebar">
-          <h2>Detalles</h2>
-          <p style={{ color: '#666', marginBottom: '20px' }}>{status}</p>
+    return (
+        <div className="app-container">
+            <header>
+                <h1>🚑 MedRoute: Sistema Inteligente de Emergencias</h1>
+            </header>
 
-          {loading && <div className="loader">Calculando...</div>}
+            <div className="main-content">
+                <div className="map-container">
+                    <MapComponent
+                        hospitales={hospitales}
+                        ruta={ruta}
+                        incidente={incidente}
+                        onMapClick={handleMapClick}
+                    />
+                </div>
 
-          {rutaInfo && (
-            <div className="info-results">
-              <div className="card">
-                <span className="info-label">Hospital Destino</span>
-                <span className="info-value">{rutaInfo.hospital_name}</span>
-              </div>
+                <div className="sidebar">
+                    <h2>Panel de Control</h2>
+                    <p className="status-msg">{status}</p>
 
-              <div className="card">
-                <span className="info-label">Tiempo Estimado</span>
-                <span className="info-value highlight-red">{rutaInfo.travel_time} min</span>
-              </div>
+                    {loading && <div className="loader">Calculando...</div>}
 
-              <div className="card">
-                <span className="info-label">Costo Ponderado</span>
-                <span className="info-value highlight-purple">{rutaInfo.total_cost}</span>
-              </div>
-              
-              <div className="card">
-                <span className="info-label">Penalización Congestión</span>
-                <span className="info-value">{rutaInfo.congestion_penalty}</span>
-              </div>
+                    {rutaInfo && (
+                        <div className="info-results fade-in">
+                            <div className="card result-card">
+                                <span className="info-label">🏥 Hospital Asignado</span>
+                                <span className="info-value large">{rutaInfo.hospital_name}</span>
+                                <div className="badge-container">
+                                    {/* Etiqueta dinámica basada en la ocupación real */}
+                                    {(rutaInfo.hospital_stats.patients / rutaInfo.hospital_stats.capacity) < 0.6 ?
+                                        <span style={{color:'green', fontWeight:'bold'}}>✅ Disponible</span> :
+                                        <span style={{color:'orange', fontWeight:'bold'}}>⚠️ Concurrido</span>
+                                    }
+                                </div>
+                            </div>
+
+                            <div className="stats-grid">
+                                <div className="card">
+                                    <span className="info-label">⏱️ Tiempo Viaje</span>
+                                    <span className="info-value">{rutaInfo.travel_time} min</span>
+                                </div>
+
+                                <div className="card">
+                                    <span className="info-label">⚖️ Costo Total</span>
+                                    <span className="info-value">{rutaInfo.total_cost}</span>
+                                </div>
+                            </div>
+
+                            {/* TARJETA DE MÉTRICAS TÉCNICAS PARA EL PROFESOR */}
+                            <div className="card metrics-card" style={{backgroundColor: '#f0f8ff', border: '1px solid #b3e0ff'}}>
+                                <span className="info-label">⚙️ Métricas del Algoritmo</span>
+                                <div className="metric-row" style={{marginTop: '10px'}}>
+                                    <span>Tiempo de Ejecución:</span><br/>
+                                    <strong style={{fontSize: '1.2em', color: '#0056b3'}}>{rutaInfo.algorithm_time_ms} ms</strong>
+                                </div>
+                                <div className="metric-row" style={{marginTop: '5px'}}>
+                                    <span>Nodos Evaluados:</span><br/>
+                                    <strong>{hospitales.length} Hospitales</strong>
+                                </div>
+                                <small style={{display:'block', marginTop:'10px', color:'#666', fontStyle:'italic'}}>
+                                    Algoritmo: Dijkstra + Heurística de Congestión
+                                </small>
+                            </div>
+
+                        </div>
+                    )}
+                </div>
             </div>
-          )}
         </div>
-      </div>
-    </div>
-  );
+    );
 }
 
 export default App;
